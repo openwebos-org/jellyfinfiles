@@ -1,0 +1,137 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Web File Manager</title>
+  <style>
+    body { font-family: sans-serif; padding: 24px; }
+    button { margin: 4px; padding: 8px 12px; }
+    #path { margin: 12px 0; font-family: monospace; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px; border-bottom: 1px solid #444; text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>Web File Manager</h1>
+  <div>
+    <button onclick="up()">Up</button>
+    <button onclick="load()">Refresh</button>
+    <button onclick="newFolder()">New Folder</button>
+    <button onclick="upload()">Upload</button>
+  </div>
+  <div id="path">/</div>
+  <table>
+    <thead><tr><th>Name</th><th>Type</th><th>Size</th><th>Actions</th></tr></thead>
+    <tbody id="files"></tbody>
+  </table>
+<script>
+let current = "";
+
+function api(path, options = {}) {
+  return ApiClient.ajax({
+    type: options.method || "GET",
+    url: "WebFileManager/" + path,
+    data: options.body,
+    contentType: options.contentType || "application/json",
+    dataType: options.dataType || "json"
+  });
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+  });
+}
+
+async function load() {
+  const q = current ? "?path=" + encodeURIComponent(current) : "";
+  const items = await api("list" + q);
+  document.getElementById("path").textContent = "/" + current;
+  const tbody = document.getElementById("files");
+  tbody.innerHTML = "";
+  for (const item of items) {
+    const tr = document.createElement("tr");
+    const open = item.isDirectory
+      ? "<button onclick='openDir(" + JSON.stringify(item.path) + ")'>Open</button>"
+      : "";
+    const download = item.isDirectory
+      ? ""
+      : "<button onclick='downloadFile(" + JSON.stringify(item.path) + ")'>Download</button>";
+    tr.innerHTML =
+      "<td>" + esc(item.name) + "</td>" +
+      "<td>" + (item.isDirectory ? "Folder" : "File") + "</td>" +
+      "<td>" + (item.size == null ? "" : item.size) + "</td>" +
+      "<td>" + open + download +
+      "<button onclick='renameItem(" + JSON.stringify(item.path) + "," + JSON.stringify(item.name) + ")'>Rename</button>" +
+      "<button onclick='deleteItem(" + JSON.stringify(item.path) + ")'>Delete</button></td>";
+    tbody.appendChild(tr);
+  }
+}
+
+function openDir(path) {
+  current = path;
+  load();
+}
+
+function up() {
+  if (!current) return;
+  const parts = current.split("/").filter(Boolean);
+  parts.pop();
+  current = parts.join("/");
+  load();
+}
+
+async function newFolder() {
+  const name = prompt("Folder name:");
+  if (!name) return;
+  const path = current ? current + "/" + name : name;
+  await api("folder", {
+    method: "POST",
+    body: JSON.stringify({ path: path })
+  });
+  load();
+}
+
+function upload() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.onchange = async function() {
+    const file = input.files[0];
+    if (!file) return;
+    await ApiClient.ajax({
+      type: "POST",
+      url: "WebFileManager/upload?path=" + encodeURIComponent(current) +
+           "&fileName=" + encodeURIComponent(file.name),
+      data: file,
+      processData: false,
+      contentType: "application/octet-stream"
+    });
+    load();
+  };
+  input.click();
+}
+
+function downloadFile(path) {
+  window.open(ApiClient.getUrl("WebFileManager/download?path=" + encodeURIComponent(path)), "_blank");
+}
+
+async function renameItem(path, name) {
+  const newName = prompt("New name:", name);
+  if (!newName || newName === name) return;
+  await api("rename", {
+    method: "POST",
+    body: JSON.stringify({ path: path, newName: newName })
+  });
+  load();
+}
+
+async function deleteItem(path) {
+  if (!confirm("Delete " + path + "?")) return;
+  await api("delete?path=" + encodeURIComponent(path), { method: "DELETE" });
+  load();
+}
+
+load();
+</script>
+</body>
+</html>
